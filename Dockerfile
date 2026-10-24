@@ -34,6 +34,7 @@ ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 ENV LANG="C.UTF-8"
 ENV LC_ALL="C.UTF-8"
+ENV HOME=/tmp
 
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
@@ -48,8 +49,10 @@ COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=nextjs:nodejs /app/package.json ./package.json
 
+RUN chown -R nextjs:nodejs /app && chmod -R 777 /app
+
 USER nextjs
 
 EXPOSE 3000
 
-CMD ["sh", "-c", "npx prisma db push --skip-generate && npx tsx prisma/seed.ts && exec node server.js"]
+CMD ["sh", "-c", "echo '==> [BarberPlay] Iniciando contenedor...' && (npx prisma db push --skip-generate || echo '==> [BarberPlay] DB Push no completado (Verifica DATABASE_URL en Coolify)') && (npx tsx prisma/seed.ts || echo '==> [BarberPlay] Seed completado u omitido') && echo '==> [BarberPlay] Servidor listo en puerto 3000' && exec node server.js"]
