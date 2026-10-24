@@ -1,0 +1,344 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Business {
+  id                     String         @id @default(cuid())
+  name                   String
+  slug                   String         @unique
+  email                  String         @unique
+  phone                  String?
+  description            String?
+  address                String?
+  logoUrl                String?        // Logo o imagen del negocio (URL o Base64)
+  currency               String         @default("USD")
+  plan                   String         @default("FREE") // "FREE" | "PRO"
+  active                 Boolean        @default(true)
+  adminPin               String         @default("1234")
+  autoRemindersEnabled   Boolean        @default(true)
+  reminderTiming         String         @default("2_HOURS_BEFORE") // "1_HOUR_BEFORE", "2_HOURS_BEFORE", "24_HOURS_BEFORE"
+  reminderMessageTemplate String?
+  liveStatus             String         @default("OPEN") // "OPEN", "LUNCH", "CLOSED_TODAY", "SPECIAL_NOTICE"
+  statusMessage          String?        // Novedad o mensaje de estado visible para los clientes
+  category               String         @default("BARBERIA") // "BARBERIA", "MANICURA_SPA", "LAVADERO", "SALUD_CONSULTORIO", "OTRO"
+  serviceModality        String         @default("LOCAL") // "LOCAL", "DOMICILIO", "HIBRIDO"
+  smsEnabled             Boolean        @default(false)
+  smsUsername            String?        @default("director@appzplay.online")
+  smsApiToken            String?
+  smsSenderId            String?        @default("BarberPlay")
+  stripeCustomerId       String?
+  stripeSubscriptionId   String?
+  stripeCurrentPeriodEnd DateTime?
+  multiBarberEnabled     Boolean        @default(false) // Toggle configurable: servicio de valor agregado
+  queueResetAt           DateTime?      // Fecha/hora del último reinicio manual de conteo de turnos
+  // Configuraciones de Manicura, Domicilios, Anticipos y Fidelización
+  homeServiceFee           Float          @default(0) // Recargo por servicio a domicilio
+  requireDepositForNew     Boolean        @default(false) // Cobrar anticipo a clientes nuevos
+  depositAmount            Float          @default(0) // Monto de anticipo sugerido
+  depositPaymentInfo       String?        // Datos para consignar anticipo (Nequi, Daviplata, etc.)
+  referralProgramEnabled   Boolean        @default(false) // Activar programa de referidos
+  referralRewardText       String?        // Beneficio o descuento por referir amigas
+  stationHardwarePin       String?        @default("0000") // PIN para conectar botoneras físicas o terminales de tocador
+
+  trialEndsAt            DateTime?      // Fin del período de prueba con beneficios PRO completos
+
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+
+  partnerId              String?
+  partner                Partner?       @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+
+  services               Service[]
+  appointments           Appointment[]
+  workingHours           WorkingHour[]
+  expenses               Expense[]
+  products               Product[]
+  productSales           ProductSale[]
+  customers              Customer[]
+  partnerCommissions     PartnerCommission[]
+  staffMembers           StaffMember[]
+  staffPayouts           StaffPayout[]
+
+  @@index([partnerId])
+  @@index([active])
+}
+
+model Service {
+  id              String        @id @default(cuid())
+  businessId      String
+  business        Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name            String
+  description     String?
+  durationMinutes Int           @default(30)
+  price           Float         @default(0)
+  active          Boolean       @default(true)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  appointments Appointment[]
+}
+
+model WorkingHour {
+  id         String   @id @default(cuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  dayOfWeek  Int      // 0 = Domingo, 1 = Lunes, ..., 6 = Sabado
+  openTime   String   @default("09:00") // Formato "HH:mm"
+  closeTime  String   @default("19:00") // Formato "HH:mm"
+  isClosed   Boolean  @default(false)
+
+  @@unique([businessId, dayOfWeek])
+}
+
+model Appointment {
+  id           String    @id @default(cuid())
+  businessId   String
+  business     Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  serviceId    String
+  service      Service   @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  clientName   String
+  clientPhone  String
+  clientEmail  String?
+  clientNotes  String?
+  appointmentType String @default("LOCAL") // "LOCAL", "DOMICILIO"
+  clientAddress   String? // Dirección en caso de servicio a domicilio
+  homeFee         Float     @default(0) // Recargo de domicilio aplicado a esta cita
+  depositRequired Float     @default(0) // Anticipo exigido si aplicó
+  depositPaid     Boolean   @default(false) // Si el anticipo ya fue confirmado
+  clientBirthday  String?   // Fecha de cumpleaños (ej: "10-24" o "1995-10-24")
+  referredBy      String?   // Nombre o teléfono de quien la recomendó
+  cancellationReason String? // Motivo reportado en caso de cancelación o novedad
+  cancelledBy     String?   // "CLIENT" | "BUSINESS"
+  paymentMethod   String?   @default("EFECTIVO") // "EFECTIVO", "NEQUI", "BANCOLOMBIA", "TARJETA"
+  date         DateTime  // Dia de la cita (UTC midnight o fecha seleccionada)
+  startTime    String    // "14:30"
+  endTime      String    // "15:00"
+  status       String    @default("CONFIRMED") // "PENDING", "CONFIRMED", "COMPLETED", "CANCELLED"
+  reminderSent Boolean   @default(false)
+  staffMemberId String?
+  staffMember   StaffMember? @relation(fields: [staffMemberId], references: [id], onDelete: SetNull)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([businessId, date])
+  @@index([businessId, status])
+  @@index([date, reminderSent])
+  @@index([clientPhone])
+  @@index([staffMemberId])
+  @@index([businessId, clientPhone])
+}
+
+model Customer {
+  id            String    @id @default(cuid())
+  businessId    String
+  business      Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name          String
+  phone         String
+  email         String?
+  birthday      String?   // Formato "MM-DD" o "YYYY-MM-DD"
+  notes         String?   // Preferencias de la clienta (esmaltes favoritos, diseño, cutícula sensible)
+  referredBy    String?   // Quién la refirió
+  referralCount Int       @default(0) // Cuántos amigos/amigas ha traído
+  totalVisits   Int       @default(0)
+  totalSpent    Float     @default(0)
+  lastVisit     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([businessId, phone])
+  @@index([businessId, phone])
+  @@index([businessId, birthday])
+
+}
+
+model Expense {
+  id          String   @id @default(cuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  description String
+  amount      Float
+  category    String   @default("INSUMOS") // "INSUMOS", "TRANSPORTE", "SERVICIOS", "ARRIENDO", "OTRO"
+  date        DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  @@index([businessId, date])
+}
+
+model Product {
+  id          String        @id @default(cuid())
+  businessId  String
+  business    Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  price       Float         @default(0)
+  costPrice   Float?        @default(0)
+  stock       Int           @default(0)
+  category    String        @default("GENERAL") // "CUIDADO", "BELLEZA", "ACCESORIOS", "GENERAL"
+  imageUrl    String?
+  active      Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  sales       ProductSale[]
+
+  @@index([businessId, active])
+}
+
+model ProductSale {
+  id            String    @id @default(cuid())
+  businessId    String
+  business      Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  productId     String
+  product       Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  quantity      Int       @default(1)
+  unitPrice     Float
+  total         Float
+  paymentMethod String    @default("EFECTIVO") // "EFECTIVO", "NEQUI", "BANCOLOMBIA", "TARJETA"
+  clientName    String?
+  date          DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+
+  @@index([businessId, date])
+}
+
+model Partner {
+  id                      String              @id @default(cuid())
+  name                    String
+  email                   String              @unique
+  phone                   String              // WhatsApp para coordinar retiros y avisos
+  referralCode            String              @unique // ej: "CARLOS10", "PRO-BOGOTA"
+  firstMonthCommissionRate Float              @default(0.50) // Bono inicial mayor para el 1er mes (captación)
+  commissionRate          Float               @default(0.20) // Comisión recurrente vitalicia personalizada (meses 2+)
+  balance                 Float               @default(0)    // Saldo disponible para retirar
+  totalEarned             Float               @default(0)    // Total acumulado histórico ganado
+  payoutMethod            String              @default("NEQUI") // "NEQUI", "DAVIPLATA", "BANCOLOMBIA", "PAYPAL", "EFECTIVO"
+  payoutAccount           String?             // Número de celular o cuenta
+  experience              String?             // Observaciones / perfil comercial / experiencia
+  status                  String              @default("PENDING") // "PENDING", "ACTIVE", "REJECTED"
+  approvedAt              DateTime?
+
+  // Modelo de Franquicia SaaS / Marca Blanca (Inscripción inicial + Mensualidad tecnológica)
+  isFranchise             Boolean             @default(false)
+  franchiseName           String?             // Nombre comercial de la franquicia (ej: "BarberPlay Medellín")
+  franchiseCityCountry    String?             // Ciudad y país (ej: "Medellín, Colombia", "Ciudad de México")
+  franchiseEntryFee       Float               @default(0) // Cuota inicial de inscripción / canon de apertura
+  franchiseEntryFeePaid   Boolean             @default(false) // Si ya pagó la inscripción inicial
+  franchiseMonthlyFee     Float               @default(0) // Mensualidad tecnológica recurrente que paga al creador
+  franchiseFeeCurrency    String              @default("USD") // "USD" o "COP"
+  franchiseStatus         String              @default("INACTIVE") // "ACTIVE", "PENDING_ENTRY_FEE", "PENDING_MONTHLY", "PAST_DUE", "INACTIVE"
+  franchiseDueDate        DateTime?           // Próxima fecha límite de pago de la mensualidad
+  franchiseNotes          String?             // Condiciones / acuerdos especiales
+
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
+
+  referredBusinesses Business[]
+  commissions        PartnerCommission[]
+  payouts            PartnerPayout[]
+
+  @@index([isFranchise])
+  @@index([status])
+}
+
+model PartnerCommission {
+  id                 String    @id @default(cuid())
+  partnerId          String
+  partner            Partner   @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  businessId         String
+  business           Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  subscriptionAmount Float     // Monto del pago de la suscripción (ej: 60000 COP o 19 USD)
+  commissionRate     Float     // Tasa aplicada personalizada (ej: 0.50 primer mes, 0.20 meses posteriores)
+  amount             Float     // Comisión ganada (calculada con su tasa asignada)
+  isFirstMonth       Boolean   @default(false) // Indica si fue bono de captación del primer mes
+  monthNumber        Int       @default(1)     // Número de mes de suscripción (1, 2, 3...)
+  description        String    // ej: "Bono Inicial 1er Mes (50%) Plan PRO"
+  createdAt          DateTime  @default(now())
+
+  @@index([partnerId])
+  @@index([businessId])
+}
+
+model PartnerPayout {
+  id            String    @id @default(cuid())
+  partnerId     String
+  partner       Partner   @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  amount        Float
+  payoutMethod  String
+  payoutAccount String
+  status        String    @default("REQUESTED") // "REQUESTED", "PAID", "REJECTED"
+  reference     String?   // Comprobante de pago / ID de transferencia
+  notes         String?
+  createdAt     DateTime  @default(now())
+  processedAt   DateTime?
+
+  @@index([partnerId, status])
+}
+
+model PlatformSettings {
+  id                    String   @id @default("global")
+  paymentMode           String   @default("MANUAL") // "MANUAL" (solo consignación), "GATEWAY" (solo pasarela Wompi/PSE), "HYBRID" (ambas)
+  wompiPublicKey        String?  @default("")
+  wompiIntegritySecret  String?  @default("")
+  wompiSandbox          Boolean  @default(true)
+  googleClientId        String?  @default("")
+  nequiNumber           String   @default("300 123 4567")
+  daviplataNumber       String   @default("300 123 4567")
+  bancolombiaDetails    String   @default("Cuenta de Ahorros Bancolombia")
+  whatsappPaymentNumber String   @default("300 123 4567")
+  proPriceCOP           Int      @default(60000)
+  independientePriceCOP Int      @default(35000)
+  partnerFirstMonthRate Float    @default(0.50) // Tasa global por defecto 1er mes (ej: 50%)
+  partnerRecurringRate  Float    @default(0.20) // Tasa global por defecto meses siguientes (ej: 20%)
+  defaultFranchiseEntryFeeUSD Float @default(99) // Inscripción inicial sugerida en USD
+  defaultFranchiseEntryFeeCOP Float @default(400000) // Inscripción inicial sugerida en COP
+  defaultFranchiseFeeUSD Float   @default(29)   // Mensualidad tecnológica sugerida en USD
+  defaultFranchiseFeeCOP Float   @default(100000) // Mensualidad tecnológica sugerida en COP
+  defaultTrialDays      Int      @default(7)      // Días de prueba gratuita por defecto para nuevos negocios
+  updatedAt             DateTime @updatedAt
+}
+
+model StaffMember {
+  id             String        @id @default(cuid())
+  businessId     String
+  business       Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name           String
+  phone          String?
+  email          String?
+  avatarUrl      String?
+  pin            String        @default("1234") // PIN de 4 dígitos para ingresar a su panel personal
+  commissionRate Float         @default(50.0)   // Porcentaje de comisión para el barbero (ej. 50% = 50%)
+  chairNumber    Int?          @default(1)      // 1, 2, 3, etc.
+  chairLabel     String?       @default("Silla 1") // "Silla 1 (Principal)", etc.
+  active         Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  appointments   Appointment[]
+  payouts        StaffPayout[]
+
+  @@index([businessId])
+  @@index([businessId, active])
+}
+
+model StaffPayout {
+  id            String      @id @default(cuid())
+  businessId    String
+  business      Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  staffMemberId String
+  staffMember   StaffMember @relation(fields: [staffMemberId], references: [id], onDelete: Cascade)
+  amount        Float       // Monto liquidado
+  servicesCount Int         @default(0) // Cantidad de servicios incluidos
+  notes         String?     // Notas o comprobante
+  periodStart   DateTime
+  periodEnd     DateTime
+  paidAt        DateTime    @default(now())
+
+  @@index([businessId])
+  @@index([staffMemberId])
+}
+
